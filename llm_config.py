@@ -1,7 +1,7 @@
-import os
 from typing import Dict, Type
-from langchain_community.chat_models import ChatOpenAI, ChatAnthropic
-# from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+import os
 
 LLM_CONFIGS: Dict[str, Dict] = {
     "openai": {

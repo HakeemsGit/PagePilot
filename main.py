@@ -4,6 +4,7 @@ from typing import Tuple, Iterator
 from scraper import DocumentationScraper
 from llm import CustomAgent
 from llm_config import LLM_CONFIGS
+from api_keys import get_api_key, set_api_key
 
 # Configure logging
 logging.basicConfig(
@@ -47,6 +48,21 @@ def initialize_llm(llm_choice: str) -> CustomAgent:
 # Global variable for LLM instance
 doc_llm = None
 
+def update_llm(llm_choice: str, api_key: str = "") -> str:
+    """Initialize or update the LLM based on selection and optional API key"""
+    global doc_llm
+    
+    if api_key:
+        set_api_key(llm_choice, api_key)
+    elif not get_api_key(llm_choice):
+        return f"Please enter API key for {LLM_CONFIGS[llm_choice]['name']}"
+
+    try:
+        doc_llm = initialize_llm(llm_choice)
+        return f"Successfully initialized {LLM_CONFIGS[llm_choice]['name']}"
+    except Exception as e:
+        return f"Error initializing LLM: {str(e)}"
+
 def query_docs(question: str) -> Tuple[str, str]:
     """
     Query the processed documentation
@@ -61,19 +77,30 @@ with gr.Blocks(title="Documentation Assistant") as demo:
     gr.Markdown("# Documentation Assistant")
     
     # LLM Selection
-    llm_choice = gr.Dropdown(
-        choices=list(LLM_CONFIGS.keys()),
-        value="openai",
-        label="Select LLM Provider"
-    )
+    with gr.Row():
+        llm_choice = gr.Dropdown(
+            choices=list(LLM_CONFIGS.keys()),
+            value="openai",
+            label="Select LLM Provider"
+        )
+        api_key_input = gr.Textbox(
+            label="API Key (optional)",
+            type="password",
+            placeholder="Enter API key if not set in environment"
+        )
     
-    def update_llm(choice):
-        global doc_llm
-        doc_llm = initialize_llm(choice)
-        return f"Selected {LLM_CONFIGS[choice]['name']}"
-        
     llm_status = gr.Textbox(label="LLM Status", interactive=False)
-    llm_choice.change(fn=update_llm, inputs=[llm_choice], outputs=[llm_status])
+    
+    llm_choice.change(
+        fn=update_llm,
+        inputs=[llm_choice, api_key_input],
+        outputs=[llm_status]
+    )
+    api_key_input.change(
+        fn=update_llm,
+        inputs=[llm_choice, api_key_input],
+        outputs=[llm_status]
+    )
     
     with gr.Tab("Add Documentation"):
         url_input = gr.Textbox(
