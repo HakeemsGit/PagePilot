@@ -1,14 +1,18 @@
 import logging
+import asyncio
+import aiohttp
+import multiprocessing as mp
 from urllib.parse import urljoin, urlparse
 import re
 import unicodedata
 import string
-import requests
 from typing import Set, List, Dict, Optional
 from bs4 import BeautifulSoup
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 
 class DocumentationScraper:
-    def __init__(self):
+    def __init__(self, max_concurrent_requests: int = 10):
         self.logger = logging.getLogger(__name__)
         self.visited_urls: Set[str] = set()
         self.doc_urls: List[str] = []
@@ -56,49 +60,82 @@ class DocumentationScraper:
         except ValueError:
             return False
 
-    def discover_urls(self, base_url: str) -> List[str]:
-        """Discover all documentation URLs from a base URL"""
+    async def _fetch_url(self, url: str, session: aiohttp.ClientSession) -> Optional[str]:
+        """Fetch a single URL asynchronously"""
+        try:
+            self.logger.info(f"Fetching URL: {url}")
+            async with session.get(url) as response:
+                return await response.text()
+        except Exception as e:
+            self.logger.error(f"Error fetching {url}: {str(e)}")
+            return None
+
+    async def _process_chunk(self, urls: List[str]) -> Set[str]:
+        """Process a chunk of URLs asynchronously"""
+        discovered_urls = set()
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for url in urls:
+                if url not in self.visited_urls:
+                    self.visited_urls.add(url)
+                    tasks.append(self._fetch_url(url, session))
+            
+            responses = await asyncio.gather(*tasks)
+            
+            for url, html_content in zip(urls, responses):
+                if html_content:
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # Extract metadata if available
+                    meta_description = soup.find('meta', attrs={'name': 'description'})
+                    if meta_description:
+                        self.logger.info(f"Found metadata: {meta_description.get('content', '')}")
+                    
+                    # Collect all links
+                    for link in soup.find_all('a'):
+                        href = link.get('href')
+                        if href:
+                            full_url = urljoin(url, href)
+                            if self._is_valid_url(full_url):
+                                discovered_urls.add(full_url)
+        
+        return discovered_urls
+
+    def _process_with_multiprocessing(self, url_chunks: List[List[str]]) -> Set[str]:
+        """Process URL chunks using multiple processes"""
+        with ProcessPoolExecutor() as executor:
+            loop = asyncio.get_event_loop()
+            tasks = [
+                loop.run_until_complete(self._process_chunk(chunk))
+                for chunk in url_chunks
+            ]
+            return set().union(*tasks)
+
+    def discover_urls(self, base_url: str, chunk_size: int = 10) -> List[str]:
+        """Discover all documentation URLs from a base URL using async and multiprocessing"""
         self.base_url = base_url
         self.visited_urls.clear()
         self.doc_urls.clear()
         
-        def crawl(url: str):
-            if url in self.visited_urls:
-                return
-            
-            self.visited_urls.add(url)
-            all_page_urls = set()
-            
-            try:
-                self.logger.info(f"Crawling URL: {url}")
-                response = requests.get(url)
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Extract metadata if available
-                meta_description = soup.find('meta', attrs={'name': 'description'})
-                if meta_description:
-                    self.logger.info(f"Found metadata: {meta_description.get('content', '')}")
-                
-                # First collect ALL links on the page
-                for link in soup.find_all('a'):
-                    href = link.get('href')
-                    if not href:
-                        continue
-                    
-                    # Convert relative URLs to absolute
-                    full_url = urljoin(url, href)
-                    all_page_urls.add(full_url)
-                
-                # Then filter and process valid ones
-                for full_url in all_page_urls:
-                    if self._is_valid_url(full_url) and full_url not in self.visited_urls:
-                        self.doc_urls.append(full_url)
-                        crawl(full_url)
-                        
-            except Exception as e:
-                self.logger.error(f"Error crawling {url}: {str(e)}")
+        # Start with the base URL
+        initial_urls = {base_url}
+        all_discovered_urls = set()
         
-        crawl(base_url)
-        # Remove duplicates and sort for cleaner output
-        self.doc_urls = sorted(list(set(self.doc_urls)))
+        while initial_urls:
+            # Process URLs in chunks
+            url_chunks = [list(initial_urls)[i:i + chunk_size] 
+                         for i in range(0, len(initial_urls), chunk_size)]
+            
+            # Process chunks with multiprocessing
+            new_urls = self._process_with_multiprocessing(url_chunks)
+            
+            # Update discovered URLs
+            all_discovered_urls.update(initial_urls)
+            
+            # Filter new URLs for next iteration
+            initial_urls = {url for url in new_urls 
+                          if url not in all_discovered_urls 
+                          and self._is_valid_url(url)}
+        
+        self.doc_urls = sorted(list(all_discovered_urls))
         return self.doc_urls
