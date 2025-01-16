@@ -81,7 +81,8 @@ with gr.Blocks(title="Documentation Assistant") as demo:
         llm_choice = gr.Dropdown(
             choices=list(LLM_CONFIGS.keys()),
             value="openai",
-            label="Select LLM Provider"
+            label="Select LLM Provider",
+            info="Note: Claude models use the Anthropic API key"
         )
         api_key_input = gr.Textbox(
             label="API Key (optional)",
