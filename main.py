@@ -5,6 +5,7 @@ from scraper import DocumentationScraper
 from llm import CustomAgent
 from llm_config import LLM_CONFIGS
 from api_keys import get_api_key, set_api_key
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -12,7 +13,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-def process_url(url: str, progress=gr.Progress()) -> Iterator[Tuple[str, str, str]]:
+def process_url(url: str, progress=gr.Progress()) -> Tuple[str, str, str]:
     """
     Process a documentation URL for ingestion
     Returns status message, discovered URLs, and any errors
@@ -21,19 +22,28 @@ def process_url(url: str, progress=gr.Progress()) -> Iterator[Tuple[str, str, st
         scraper = DocumentationScraper()
         progress(0, desc="Starting URL discovery...")
         
+        # Create event loop if it doesn't exist
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
         urls = scraper.discover_urls(url)
         total_urls = len(urls)
         
-        progress(0.5, desc=f"Found {total_urls} documentation pages")
+        if total_urls == 0:
+            return "", "", f"No valid URLs found at {url}"
         
-        # For now, just return the discovered URLs
+        progress(0.5, desc=f"Found {total_urls} documentation pages")
         urls_text = "\n".join(urls)
         progress(1.0, desc="Completed URL discovery")
         
-        yield f"Successfully processed {url}", urls_text, ""
+        return f"Successfully processed {url}", urls_text, ""
         
     except Exception as e:
-        yield "", "", f"Error processing URL: {str(e)}"
+        logging.error(f"Error processing URL: {str(e)}", exc_info=True)
+        return "", "", f"Error processing URL: {str(e)}"
 
 
 # Initialize LLM based on selection
@@ -116,7 +126,8 @@ with gr.Blocks(title="Documentation Assistant") as demo:
         process_button.click(
             fn=process_url,
             inputs=[url_input],
-            outputs=[status_output, urls_output, error_output]
+            outputs=[status_output, urls_output, error_output],
+            show_progress=True
         )
     
     with gr.Tab("Query Documentation"):
