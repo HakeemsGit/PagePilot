@@ -35,7 +35,7 @@ class DocumentEmbeddings:
         schema = CollectionSchema(fields=fields, description="Documentation embeddings")
         
         # Create collection if it doesn't exist
-        if self.collection_name not in Collection.list():
+        if self.collection_name not in utility.list_collections():
             self.collection = Collection(name=self.collection_name, schema=schema)
             # Create index for vector similarity search
             index_params = {

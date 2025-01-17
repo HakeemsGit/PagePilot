@@ -3,10 +3,11 @@ import asyncio
 from typing import Tuple
 import gradio as gr
 
-from documentation_scraper import DocumentationScraper
+from scraper import DocumentationScraper
 from embeddings import DocumentEmbeddings
-from agent import CustomAgent
-from llm_config import LLM_CONFIGS, set_api_key, get_api_key
+from llm import CustomAgent
+from api_keys import set_api_key, get_api_key
+from llm_config import LLM_CONFIGS
 
 # Configure logging
 logging.basicConfig(
@@ -23,14 +24,14 @@ def process_url(url: str, progress=gr.Progress()) -> Tuple[str, str, str]:
         scraper = DocumentationScraper()
         progress(0, desc="Starting URL discovery...")
         
-        # Create event loop if it doesn't exist
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # Always create a new event loop for each request
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        urls = scraper.discover_urls(url)
+        try:
+            urls = loop.run_until_complete(scraper.discover_urls(url))
+        finally:
+            loop.close()
         total_urls = len(urls)
         
         if total_urls == 0:
