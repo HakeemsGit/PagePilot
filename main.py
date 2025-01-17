@@ -1,11 +1,13 @@
-import gradio as gr
 import logging
-from typing import Tuple, Iterator
-from scraper import DocumentationScraper
-from llm import CustomAgent
-from llm_config import LLM_CONFIGS
-from api_keys import get_api_key, set_api_key
 import asyncio
+from typing import Tuple
+import gradio as gr
+
+from test_data import TEST_URLS
+from documentation_scraper import DocumentationScraper
+from embeddings import DocumentEmbeddings
+from agent import CustomAgent
+from llm_config import LLM_CONFIGS, set_api_key, get_api_key
 
 # Configure logging
 logging.basicConfig(
@@ -45,9 +47,8 @@ def process_url(url: str, progress=gr.Progress()) -> Tuple[str, str, str]:
         logging.error(f"Error processing URL: {str(e)}", exc_info=True)
         return "", "", f"Error processing URL: {str(e)}"
 
-
-# Initialize LLM based on selection
 def initialize_llm(llm_choice: str) -> CustomAgent:
+    """Initialize LLM based on selection"""
     if llm_choice not in LLM_CONFIGS:
         raise ValueError(f"Unknown LLM choice: {llm_choice}")
     
@@ -55,8 +56,10 @@ def initialize_llm(llm_choice: str) -> CustomAgent:
     llm = config["class"](**config["kwargs"])
     return CustomAgent(task="documentation_assistant", llm=llm)
 
-# Global variable for LLM instance
+# Global variables
 doc_llm = None
+doc_embeddings = DocumentEmbeddings()
+vector_store = None
 
 def update_llm(llm_choice: str, api_key: str = "") -> str:
     """Initialize or update the LLM based on selection and optional API key"""
@@ -74,13 +77,24 @@ def update_llm(llm_choice: str, api_key: str = "") -> str:
         return f"Error initializing LLM: {str(e)}"
 
 def query_docs(question: str) -> Tuple[str, str]:
-    """
-    Query the processed documentation
-    Returns answer and source links
-    """
-    response = doc_llm.query(question)
-    sources = "\n".join(response["sources"]) if response["sources"] else "No sources found"
-    return response["answer"], sources
+    """Query the documentation with a question"""
+    if not vector_store:
+        return "Please process documentation first", ""
+        
+    # Get relevant documents
+    docs = vector_store.similarity_search(question, k=3)
+    
+    # Format response
+    answer = "Based on the documentation:\n\n"
+    sources = set()
+    
+    for doc in docs:
+        answer += f"{doc.page_content}\n\n"
+        sources.add(doc.metadata["source"])
+    
+    sources_text = "Sources:\n" + "\n".join(sources)
+    
+    return answer, sources_text
 
 # Create the Gradio interface
 with gr.Blocks(title="Documentation Assistant") as demo:

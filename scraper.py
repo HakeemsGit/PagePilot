@@ -13,10 +13,17 @@ from functools import partial
 
 class DocumentationScraper:
     def __init__(self, max_concurrent_requests: int = 10):
+        """
+        Initialize the DocumentationScraper.
+        
+        Args:
+            max_concurrent_requests: Maximum number of concurrent HTTP requests
+        """
         self.logger = logging.getLogger(__name__)
         self.visited_urls: Set[str] = set()
         self.doc_urls: List[str] = []
         self.base_url = ""
+        self.max_concurrent_requests = max_concurrent_requests
         self.irrelevant_patterns = [
             r'\b(?:contact us|subscribe|related articles)\b',
             r'\b(?:privacy policy|terms of service)\b',
@@ -25,7 +32,15 @@ class DocumentationScraper:
         self.non_char_pattern = re.compile(r'\\u[0-9a-fA-F]{4}|\\[xuU][0-9a-fA-F]{1,6}|[^\w\s.,!?-]')
 
     def _clean_text(self, text: str) -> str:
-        """Remove non-characters, Unicode escape sequences, and non-printable characters from text."""
+        """
+        Remove non-characters, Unicode escape sequences, and non-printable characters from text.
+        
+        Args:
+            text: Input text to clean
+            
+        Returns:
+            Cleaned text string
+        """
         text = text.encode('utf-8').decode('unicode_escape')
         text = self.non_char_pattern.sub('', text)
         text = unicodedata.normalize('NFKD', text)
@@ -33,7 +48,15 @@ class DocumentationScraper:
         return text.strip()
 
     def _extract_text(self, soup: BeautifulSoup) -> str:
-        """Extract clean text from BeautifulSoup object."""
+        """
+        Extract clean text from BeautifulSoup object.
+        
+        Args:
+            soup: BeautifulSoup object to extract text from
+            
+        Returns:
+            Extracted and cleaned text
+        """
         for script in soup(["script", "style"]):
             script.decompose()
         text = soup.get_text(separator=' ', strip=True)
@@ -41,7 +64,15 @@ class DocumentationScraper:
         return ' '.join(text.split())
 
     def _is_valid_url(self, url: str) -> bool:
-        """Check if URL is valid and belongs to the same domain."""
+        """
+        Check if URL is valid and belongs to the same domain.
+        
+        Args:
+            url: URL to validate
+            
+        Returns:
+            Boolean indicating if URL is valid
+        """
         if not url:
             return False
         
@@ -61,17 +92,37 @@ class DocumentationScraper:
             return False
 
     async def _fetch_url(self, url: str, session: aiohttp.ClientSession) -> Optional[str]:
-        """Fetch a single URL asynchronously"""
+        """
+        Fetch a single URL asynchronously.
+        
+        Args:
+            url: URL to fetch
+            session: aiohttp ClientSession to use
+            
+        Returns:
+            HTML content as string or None if fetch failed
+        """
         try:
             self.logger.info(f"Fetching URL: {url}")
             async with session.get(url) as response:
-                return await response.text()
+                if response.status == 200:
+                    return await response.text()
+                self.logger.warning(f"HTTP {response.status} for URL: {url}")
+                return None
         except Exception as e:
             self.logger.error(f"Error fetching {url}: {str(e)}")
             return None
 
     async def _process_chunk(self, urls: List[str]) -> Set[str]:
-        """Process a chunk of URLs asynchronously"""
+        """
+        Process a chunk of URLs asynchronously.
+        
+        Args:
+            urls: List of URLs to process
+            
+        Returns:
+            Set of discovered URLs
+        """
         discovered_urls = set()
         async with aiohttp.ClientSession() as session:
             tasks = []
@@ -102,7 +153,15 @@ class DocumentationScraper:
         return discovered_urls
 
     def _process_with_multiprocessing(self, url_chunks: List[List[str]]) -> Set[str]:
-        """Process URL chunks using multiple processes"""
+        """
+        Process URL chunks using multiple processes.
+        
+        Args:
+            url_chunks: List of URL chunks to process
+            
+        Returns:
+            Set of all discovered URLs
+        """
         with ProcessPoolExecutor() as executor:
             loop = asyncio.get_event_loop()
             tasks = [
@@ -111,8 +170,22 @@ class DocumentationScraper:
             ]
             return set().union(*tasks)
 
-    def discover_urls(self, base_url: str, chunk_size: int = 10) -> List[str]:
-        """Discover all documentation URLs from a base URL using async and multiprocessing"""
+    def discover_urls(self, base_url: str, chunk_size: int = 10, use_test_urls: bool = False) -> List[str]:
+        """
+        Discover all documentation URLs from a base URL.
+        
+        Args:
+            base_url: Starting URL for discovery
+            chunk_size: Size of URL chunks for parallel processing
+            use_test_urls: If True, return test URLs instead of scraping
+            
+        Returns:
+            List of discovered documentation URLs
+        """
+        if use_test_urls:
+            from tests import TEST_URLS
+            return TEST_URLS
+            
         self.base_url = base_url
         self.visited_urls.clear()
         self.doc_urls.clear()
