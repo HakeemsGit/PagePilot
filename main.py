@@ -3,7 +3,6 @@ import asyncio
 from typing import Tuple
 import gradio as gr
 
-from test_data import TEST_URLS
 from documentation_scraper import DocumentationScraper
 from embeddings import DocumentEmbeddings
 from agent import CustomAgent
