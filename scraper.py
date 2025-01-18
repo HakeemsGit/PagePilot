@@ -12,18 +12,20 @@ from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 
 class DocumentationScraper:
-    def __init__(self, max_concurrent_requests: int = 10):
+    def __init__(self, max_concurrent_requests: int = 10, max_urls: int = 100):
         """
         Initialize the DocumentationScraper.
         
         Args:
             max_concurrent_requests: Maximum number of concurrent HTTP requests
+            max_urls: Maximum number of URLs to scrape
         """
         self.logger = logging.getLogger(__name__)
         self.visited_urls: Set[str] = set()
         self.doc_urls: List[str] = []
         self.base_url = ""
         self.max_concurrent_requests = max_concurrent_requests
+        self.max_urls = max_urls
         self.irrelevant_patterns = [
             r'\b(?:contact us|subscribe|related articles)\b',
             r'\b(?:privacy policy|terms of service)\b',
@@ -76,12 +78,10 @@ class DocumentationScraper:
         if not url:
             return False
         
-        # Ignore fragments and query parameters
-        if '#' in url:
-            url = url.split('#')[0]
-        if '?' in url:
-            url = url.split('?')[0]
-            
+        # Remove fragments and query parameters
+        url = url.split('#')[0]
+        url = url.split('?')[0]
+        
         try:
             result = urlparse(url)
             base_parsed = urlparse(self.base_url)
@@ -202,13 +202,21 @@ class DocumentationScraper:
             # Process chunks with multiprocessing
             new_urls = self._process_with_multiprocessing(url_chunks)
             
-            # Update discovered URLs
+            # Update discovered URLs, respecting max_urls limit
             all_discovered_urls.update(initial_urls)
-            
+            if len(all_discovered_urls) >= self.max_urls:
+                all_discovered_urls = set(list(all_discovered_urls)[:self.max_urls])
+                break
+                
             # Filter new URLs for next iteration
             initial_urls = {url for url in new_urls 
                           if url not in all_discovered_urls 
                           and self._is_valid_url(url)}
+            
+            # If adding these would exceed max_urls, limit them
+            if len(initial_urls) + len(all_discovered_urls) > self.max_urls:
+                remaining = self.max_urls - len(all_discovered_urls)
+                initial_urls = set(list(initial_urls)[:remaining])
         
         self.doc_urls = sorted(list(all_discovered_urls))
         return self.doc_urls
